@@ -1,0 +1,66 @@
+# --- Terraform core (never commit state) ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+terraform.tfstate.d/
+.terraform.tfstate.lock.info
+
+# Plans & crash logs
+tfplan*
+*.tfplan
+crash.log
+crash.*.log
+
+# Override files (local-only tweaks)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Secret var files (envs/*.tfvars here are safe examples and ARE committed)
+*.secret.tfvars
+*.tfvars.secret
+*.auto.tfvars
+terraform.rc
+
+# --- LocalStack ---
+.localstack/
+docker-compose.override.yml
+
+# --- Build artifacts ---
+modules/messaging/.build/
+**/.build/
+*.zip
+*.tar.gz
+
+# --- Python (lambda_src) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# --- Secrets / credentials (never commit) ---
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+credentials.json
+*.jks
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Logs ---
+*.log
+logs/

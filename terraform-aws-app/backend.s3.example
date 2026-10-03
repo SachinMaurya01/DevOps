@@ -1,0 +1,17 @@
+# Copy this over backend.tf when you move to real AWS.
+# Create the bucket first with the config in ./bootstrap.
+#
+# With the S3 backend, every workspace is stored automatically under
+#   env:/<workspace>/<key>
+# so dev, staging and prod keep separate state in one bucket.
+#
+# use_lockfile needs Terraform >= 1.10 (S3 native locking, no DynamoDB table).
+terraform {
+  backend "s3" {
+    bucket       = "REPLACE-ME-tfstate-bucket"
+    key          = "myapp/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

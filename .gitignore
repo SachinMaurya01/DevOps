@@ -1,0 +1,23 @@
+# --- OS / editors (root) ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# --- Local build artifacts (don't commit) ---
+*.zip
+*.tar.gz
+terraform.tfstate
+terraform.tfstate.backup
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+
+# --- Secrets ---
+.env
+.env.*
+*.pem
+*.key
