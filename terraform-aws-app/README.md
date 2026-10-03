@@ -2,6 +2,62 @@
 
 A small but production-shaped AWS stack, written to be **learned in stages**:
 
+```mermaid
+graph TB
+    Internet["Internet / User"] --> CloudFront
+    Internet --> EIP
+
+    subgraph CDN["Stage 5 - modules/cdn"]
+        CloudFront["CloudFront + OAC"]
+    end
+
+    subgraph VPC["VPC 10.x.0.0/16 - Stage 1 - modules/network"]
+        IGW["Internet Gateway"]
+        subgraph PublicSubnets["Public subnets"]
+            Frontend["Frontend EC2 - Ubuntu + nginx + Docker"]
+            NAT["NAT Gateways"]
+        end
+        subgraph PrivateSubnets["Private subnets"]
+            Backend["Backend EC2 - Ubuntu + nginx + Docker"]
+        end
+        NAT --> IGW
+    end
+
+    subgraph Storage["Stage 2 - modules/storage"]
+        S3Bucket[("S3 bucket - private + encrypted")]
+    end
+
+    subgraph Messaging["Stage 3 - modules/messaging"]
+        SQS["SQS jobs queue"]
+        DLQ["Dead-letter queue"]
+        LambdaFn["Lambda - Python"]
+        Logs[("CloudWatch Logs")]
+    end
+
+    EIP["Elastic IP 80/443"] --> Frontend
+    Frontend -->|"API proxy to backend"| Backend
+    Backend -->|"outbound via NAT"| NAT
+    CloudFront -->|"OAC signed read"| S3Bucket
+    Frontend -->|"read-write via IAM role"| S3Bucket
+    Backend -->|"read-write via IAM role"| S3Bucket
+    Backend -->|"direct jobs"| SQS
+    S3Bucket -->|"S3 event for uploads"| SQS
+    SQS -->|"event source mapping"| LambdaFn
+    SQS -->|"after N failures"| DLQ
+    LambdaFn --> Logs
+```
+
+```mermaid
+graph LR
+    S1["Stage 1 - Network"] --> S2["Stage 2 - Storage"]
+    S2 --> S3["Stage 3 - Messaging"]
+    S3 --> S4["Stage 4 - Compute"]
+    S4 --> S5["Stage 5 - CDN + full apply"]
+```
+
+<details>
+<summary>Text fallback (ASCII)</summary>
+
 ```
                     Internet
                        |
@@ -24,6 +80,8 @@ A small but production-shaped AWS stack, written to be **learned in stages**:
    Lambda (Python)
 ```
 
+</details>
+
 | Piece | Where |
 |---|---|
 | VPC, subnets, Internet Gateway, NAT, route tables | `modules/network` |
@@ -33,11 +91,9 @@ A small but production-shaped AWS stack, written to be **learned in stages**:
 | CloudFront in front of S3 | `modules/cdn` |
 | dev / staging / prod differences | `locals.tf` (one map, keyed by workspace) |
 
-> Verified 2026-10-03: `terraform init` + `validate` clean, `plan -var-file=envs/localstack.tfvars` → **40 to add** on LocalStack, workspaces `dev/staging/prod` created.
-
 ---
 
-## 0. Quick start (TL;DR)
+## 0. Quick start
 
 ```bash
 # 1. LocalStack running? Reuse it or start it:
@@ -254,18 +310,6 @@ terraform apply -var-file=envs/localstack.tfvars
 terraform output
 ./scripts/validate.sh all localstack
 ```
-
-✅ Validate: second `terraform plan` says *No changes* — code matches reality.
-
-> **LocalStack reality check.** LocalStack simulates the EC2 *API*: instances,
-> subnets and security groups exist, but `user_data` does not actually run, so nginx and Docker are
-> not installed in LocalStack. You learn the Terraform and the wiring there; the install scripts
-> (`modules/compute/templates/`) only really execute on real AWS. CloudFront is disabled in
-> `envs/localstack.tfvars` because it was not in the free tier when this was written — check
-> LocalStack's service coverage page and flip `enable_cloudfront` if your plan includes it.
-> If EC2 fails with `InvalidAMIID`, list valid fake IDs and override:
-> `aws --endpoint-url http://localhost:4566 ec2 describe-images --query 'Images[].ImageId' --output table`
-> then `terraform plan -var-file=envs/localstack.tfvars -var='localstack_ami_id=ami-...'`.
 
 ---
 
