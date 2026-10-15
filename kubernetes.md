@@ -18,13 +18,18 @@
 
 ### What is Kubernetes?
 Container orchestration platform for automating deployment, scaling, and management of containerized applications.
+- Declarative: you define desired state (3 replicas), controllers drive reality to match.
+- Self-healing: restarts failed containers, reschedules dead nodes, kills unhealthy pods.
+- Portable: same manifests run on minikube, EKS, GKE, AKS.
 
 ### Key Objects
 | Object | Purpose |
 |--------|---------|
-| **Pod** | Smallest deployable unit (1+ containers) |
-| **Node** | Worker machine (VM or bare metal) |
-| **Cluster** | Set of nodes running containerized apps |
+| **Pod** | Smallest deployable unit (1+ containers sharing IP/storage) |
+| **Node** | Worker machine (VM or bare metal) running kubelet + runtime |
+| **Cluster** | Set of nodes + control plane running your apps |
+| **Namespace** | Virtual partition to isolate teams/envs (`dev`, `prod`) |
+| **Label/Selector** | Key-value tags (`app: nginx`) linking Services to Pods |
 | **Control Plane** | Manages cluster state (API server, scheduler, controller manager) |
 | **kubectl** | CLI for interacting with cluster |
 
@@ -52,13 +57,19 @@ Container orchestration platform for automating deployment, scaling, and managem
 ```
 
 ### Node Components
-- **kubelet** - Agent ensuring containers run in Pods
-- **kube-proxy** - Network proxy maintaining network rules
-- **Container Runtime** - Docker, containerd, CRI-O
+- **kubelet** - Agent ensuring containers run in Pods (talks to API server, runs probes)
+- **kube-proxy** - Network proxy maintaining iptables/IPVS rules for Services
+- **Container Runtime** - Pulls images + runs containers (containerd, CRI-O)
+
+> Flow: `kubectl apply` → API Server validates → etcd stores → Scheduler picks node → kubelet pulls image → kube-proxy wires networking.
 
 ---
 
 ## Workloads
+
+- Pod = ephemeral, never repaired — if it dies, controller replaces it. Don't use bare Pods in prod.
+- Deployment = manages ReplicaSet + rolling updates for stateless apps. Use for 90% of workloads.
+- Labels must match `selector.matchLabels` ↔ `template.metadata.labels`, else Deployment won't manage Pods.
 
 ### Pod
 ```yaml
@@ -100,16 +111,20 @@ spec:
 ```
 
 ### Other Workload Types
-| Type | Use Case |
-|------|----------|
-| **StatefulSet** | Stateful apps (databases) |
-| **DaemonSet** | Node-level agents (logging, monitoring) |
-| **Job** | One-time batch tasks |
-| **CronJob** | Scheduled recurring tasks |
+| Type | Use Case | Key detail |
+|------|----------|------------|
+| **StatefulSet** | Stateful apps (databases) | Stable `web-0, web-1` names + per-pod PVC |
+| **DaemonSet** | Node-level agents (logging, monitoring) | One pod per node, auto-adds on new nodes |
+| **Job** | One-time batch tasks | Runs to completion, `backoffLimit` retries |
+| **CronJob** | Scheduled recurring tasks | Cron syntax, `concurrencyPolicy: Forbid` to avoid overlap |
 
 ---
 
 ## Services & Networking
+
+- Service = stable virtual IP + DNS (`nginx-service.default.svc.cluster.local`) fronting ephemeral Pod IPs.
+- `selector` must match Pod labels; `port` = Service port, `targetPort` = container port.
+- Ingress = L7 HTTP router (host/path → Service), needs Ingress controller (nginx, ALB). NetworkPolicy = firewall, default allow-all — add `deny-all` then whitelist.
 
 ### Service Types
 ```yaml
@@ -158,12 +173,14 @@ spec:
 
 ### Network Policies
 ```yaml
+# Default deny-all: blocks all ingress/egress to selected pods
+# Add allow rules per app after this (zero-trust)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: deny-all
 spec:
-  podSelector: {}
+  podSelector: {} # empty = all pods in namespace
   policyTypes:
   - Ingress
   - Egress
@@ -172,6 +189,10 @@ spec:
 ---
 
 ## Storage
+
+- Pods are ephemeral — data dies with them. Use PV/PVC for persistence.
+- PV = cluster storage pool (admin/EBS provisioner creates). PVC = dev's claim (`5Gi`). Pod mounts PVC.
+- StorageClass enables dynamic provisioning (no manual PV). `Retain` keeps data after delete, `Delete` wipes it. `WaitForFirstConsumer` delays binding until pod scheduled (AZ-aware).
 
 ### PersistentVolume (PV) - Cluster resource
 ```yaml
@@ -223,6 +244,10 @@ volumeBindingMode: WaitForFirstConsumer
 
 ## Configuration
 
+- ConfigMap = plaintext config (env vars, files). Secret = base64-encoded sensitive data (passwords, certs) — enable etcd encryption at rest.
+- Consume via `env`, `envFrom`, or volume mount. Volume mounts update on change (kubelet syncs ~1min); env vars require pod restart.
+- Never bake config in image — same image + different ConfigMap per env (`dev`/`prod`).
+
 ### ConfigMap - Non-sensitive config
 ```yaml
 apiVersion: v1
@@ -272,6 +297,10 @@ spec:
 ---
 
 ## Security
+
+- RBAC: Role = namespace permissions, ClusterRole = cluster-wide. Binding grants to User/Group/ServiceAccount.
+- Always use least-privilege ServiceAccounts per app, not `default`. Combine with `runAsNonRoot`, `readOnlyRootFilesystem`, `drop: [ALL]` to limit exploit impact.
+- Pod Security Standards: enforce `restricted` via namespace label `pod-security.kubernetes.io/enforce: restricted`.
 
 ### RBAC (Role-Based Access Control)
 ```yaml
@@ -341,6 +370,10 @@ spec:
 
 ## Observability
 
+- Requests = guaranteed scheduling (scheduler fits sum(requests) ≤ node allocatable). Limits = max throttle/kill (`cpu` throttles, `memory` OOMKills).
+- Probes: `liveness` restarts stuck container, `readiness` removes from Service during startup, `startup` extends grace for slow boots.
+- Metrics Server feeds `kubectl top` + HPA; logs via `kubectl logs`, aggregate with Loki/ELK in prod.
+
 ### Resource Requests & Limits
 ```yaml
 resources:
@@ -392,6 +425,10 @@ kubectl logs <pod-name> -c <container-name> --tail=100 -f
 ---
 
 ## Advanced Topics
+
+- HPA scales replicas on CPU/memory/custom metrics (needs requests set + Metrics Server). VPA resizes requests/limits (don't use both on same metric — they fight).
+- Cluster Autoscaler adds/removes nodes when pods pend; Karpenter (AWS) is faster, bin-packing provisioner.
+- Helm = templated packages (`values.yaml` overrides); Kustomize = overlay patches without templates (`bases` + `patches`). Operators = CRD + controller encoding ops knowledge (e.g. Postgres failover).
 
 ### Horizontal Pod Autoscaler (HPA)
 ```yaml
@@ -497,6 +534,9 @@ metadata:
 
 ## Common Commands
 
+- `get` = list, `describe` = details + events, `logs` = stdout, `exec` = shell in, `apply` = declarative sync.
+- Debug order: `get pods` → `describe pod` (events) → `logs` → `exec` → `get events --sort-by`.
+
 ### Cluster Info
 ```bash
 kubectl cluster-info
@@ -566,6 +606,8 @@ kubectl config set-context --current --namespace=<namespace>
 ---
 
 ## Best Practices Summary
+
+- Why: bare Pods have no self-healing, missing limits cause noisy-neighbor OOMs, `:latest` breaks rollbacks, open RBAC + root containers widen blast radius.
 
 | Category | Practice |
 |----------|----------|
